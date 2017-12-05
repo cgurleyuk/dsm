@@ -62,6 +62,22 @@ module dsm
         return out
     end
 
+    function sim_mod(md::mod_fo, in::Array{Float64, 1})
+        szin = size(in);
+        int1 = zeros(szin);
+        y    = zeros(szin);
+        q    = uniform_quantizer(2);
+
+        y[1] = 1;
+
+        for i = 2:length(in)
+            int1[i] = int1[i-1] + md.b_1*in[i-1] - md.a_1*y[i-1];
+            y[i] = quantize(int1[i], q);
+        end
+
+        return (y, int1)
+    end
+
     function sim_snr(md::mod_so, a)
         snr = zeros(size(a));
 
