@@ -1,14 +1,17 @@
 module dsm
-    export snr, mod_so, mod_so_out, sim_mod, sim_snr
+    export Mod1, Mod2
+    export snr, sim_mod, sim_snr
 
     import DSP
 
-    type mod_fo
+    abstract type Mod end
+
+    type Mod1 <: Mod
         a_1::Float64
         b_1::Float64
     end
 
-    type mod_so
+    type Mod2 <: Mod
         a_1::Float64
         a_2::Float64
         b_1::Float64
@@ -18,18 +21,12 @@ module dsm
         d_13::Float64
     end
 
-    type mod_so_out
-        int1::Array{Float64, 1}
-        int2::Array{Float64, 1}
-        q::Array{Float64, 1}
-    end
-
     function uniform_quantizer(n::Int64)
         return collect(linspace(-1, 1, n+1)[2:end-1]);
     end
 
     # TODO: implement random quantizer
-    function random_quantizer(n::Int64, sd::Float64)
+    function random_quantizer(n::Int64)
         return collect(linspace(-1, 1, n+1)[2:end-1]);
     end
 
@@ -47,22 +44,23 @@ module dsm
         return r
     end
 
-    function sim_mod(md::mod_so, in::Array{Float64, 1})
+    function sim_mod(md::Mod2, in::Array{Float64, 1})
         szin = size(in)
-        out  = mod_so_out(zeros(szin), zeros(szin), zeros(szin))
-
-        out.q[1]  = 1;
+        int1 = zeros(szin);
+        int2 = zeros(szin);
+        q    = zeros(szin);
+        q[1] = 1;
 
         for i = 2:length(in)
-            out.int1[i] = out.int1[i-1] + md.b_1*in[i-1] - md.a_1*out.q[i-1];
-            out.int2[i] = out.int2[i-1] + md.c_1*out.int1[i] + md.b_2*in[i-1] - md.a_2*out.q[i-1];
-            out.q[i] = ((md.c_2*out.int2[i] + md.d_13*out.int1[i]) > 0)*2-1;
+            int1[i] = int1[i-1] + md.b_1*in[i-1] - md.a_1*q[i-1];
+            int2[i] = int2[i-1] + md.c_1*int1[i] + md.b_2*in[i-1] - md.a_2*q[i-1];
+            q[i] = ((md.c_2*int2[i] + md.d_13*int1[i]) > 0)*2-1;
         end
 
-        return out
+        return (q, int1, int2)
     end
 
-    function sim_mod(md::mod_fo, in::Array{Float64, 1})
+    function sim_mod(md::Mod1, in::Array{Float64, 1})
         szin = size(in);
         int1 = zeros(szin);
         y    = zeros(szin);
@@ -78,7 +76,7 @@ module dsm
         return (y, int1)
     end
 
-    function sim_snr(md::mod_so, a)
+    function sim_snr(md::Mod, a)
         snr = zeros(size(a));
 
         n_fft = 2^16;
@@ -88,40 +86,40 @@ module dsm
         t     = collect(0:(n_fft+n_i-1));
 
         for i = 1:length(a)
-            in     = a[i]*sin.(2*pi*f_i*t);
-            out    = dsm.sim_mod(md, in);
+            inp    = a[i]*sin.(2*pi*f_i*t);
+            out    = dsm.sim_mod(md, inp);
             
-            q      = out.q[end-n_fft+1:end];
+            q      = out[1][end-n_fft+1:end];
             snr[i] = dsm.snr(q, f_i, f_bw, 1);
         end
 
         return snr
     end
 
-    function snr_iq(y, f_i, f_bw)
-        n   = length(y);
-        nbw = trunc(Int64, n*f_bw);
-
-        xs = sin.(2*pi*f_i*(1:n));
-        xc = cos.(2*pi*f_i*(1:n));
-        a  = sum(2*xs.*y)/n;
-        b  = sum(2*xc.*y)/n;
-
-        i_sig = (a*xs+b*xc);
-        i_noi = y - i_sig;
-
-        w     = DSP.Windows.hanning(n);
-        wf    = sum(w.^2)/n;
-        wfa   = sum(w)/n;
-
-        I_sig = fft(i_sig.*w)/n
-        I_noi = fft(i_noi.*w)/n;
-
-        P_sig = sum(abs.(I_sig[1:nbw]).^2);
-        P_noi = sum(abs.(I_noi[1:nbw]).^2);
-
-        10*log10(P_sig/P_noi)
-    end
+#    function snr_iq(y, f_i, f_bw)
+#        n   = length(y);
+#        nbw = trunc(Int64, n*f_bw);
+#
+#        xs = sin.(2*pi*f_i*(1:n));
+#        xc = cos.(2*pi*f_i*(1:n));
+#        a  = sum(2*xs.*y)/n;
+#        b  = sum(2*xc.*y)/n;
+#
+#        i_sig = (a*xs+b*xc);
+#        i_noi = y - i_sig;
+#
+#        w     = DSP.Windows.hanning(n);
+#        wf    = sum(w.^2)/n;
+#        wfa   = sum(w)/n;
+#
+#        I_sig = fft(i_sig.*w)/n
+#        I_noi = fft(i_noi.*w)/n;
+#
+#        P_sig = sum(abs.(I_sig[1:nbw]).^2);
+#        P_noi = sum(abs.(I_noi[1:nbw]).^2);
+#
+#        10*log10(P_sig/P_noi)
+#    end
 
     function snr_kaiser(y, f_i, f_bw, f_s)
         n = length(y);
